@@ -1,0 +1,166 @@
+Metadata-Version: 2.4
+Name: structured-data-extractor
+Version: 0.1.0
+Summary: Fault-tolerant invoice extraction with Pydantic v2 validation, reflection retries, and DLQ fallback
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: pydantic>=2.8
+Requires-Dist: openai>=1.60
+Requires-Dist: python-dotenv>=1.0
+Requires-Dist: pypdf>=5.0
+Requires-Dist: beautifulsoup4>=4.12
+Requires-Dist: streamlit>=1.39
+Requires-Dist: json-repair>=0.30
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.24; extra == "dev"
+
+# Resilient Unstructured Data Extractor
+
+A fault-tolerant invoice extraction pipeline for AD331. The application converts messy PDF/HTML/text into strongly typed Pydantic v2 records, retries failed extractions with targeted validation feedback, and routes irrecoverable payloads to a dead-letter queue (DLQ).
+
+## Architecture
+
+```mermaid
+flowchart LR
+    A[PDF / HTML / Text] --> B[Text extraction]
+    B --> C[Structured LLM decoding]
+    C --> D[Pydantic v2 validation]
+    D -->|Pass| E[Validated JSON / UI]
+    D -->|Fail| F[Reflection prompt with exact validation error]
+    F --> C
+    D -->|Retries exhausted| G[Heuristic JSON repair]
+    G --> D
+    G -->|Still invalid| H[DLQ JSONL + human review]
+```
+
+## Key reliability controls
+
+- Pydantic v2 nested models and field bounds
+- Cross-field reconciliation for line totals, subtotal, tax, and grand total
+- OpenAI Responses API JSON Schema structured output path
+- Targeted reflection retries using exact Pydantic validation errors
+- Bounded retry count
+- Heuristic JSON syntax repair without bypassing schema validation
+- Dead-letter queue for irrecoverable payloads
+- Streamlit audit UI
+- Local demo providers so the reflection and DLQ paths can be demonstrated without spending API credits
+
+## Project structure
+
+```text
+structured-data-extractor/
+├── pyproject.toml
+├── .env.example
+├── README.md
+├── ai_prompt_log.md
+├── audit/
+│   └── baseline_excerpt.py
+├── samples/
+│   └── invoice_messy.html
+├── src/
+│   ├── __init__.py
+│   ├── schemas.py
+│   ├── providers.py
+│   ├── parsers.py
+│   ├── fallback.py
+│   ├── extractor.py
+│   └── app.py
+├── data/
+└── tests/
+    ├── test_extraction.py
+    └── test_fallbacks.py
+```
+
+## Schema specification
+
+### `LineItem`
+
+- `description: str`
+- `quantity: int > 0`
+- `unit_price: float > 0`
+- `line_total: float >= 0`
+- Validator: `line_total ≈ quantity * unit_price` within 0.02
+
+### `InvoiceExtraction`
+
+- `invoice_number: str`
+- `vendor_name: str`
+- `invoice_date: date`
+- `line_items: list[LineItem]`
+- `subtotal: float >= 0`
+- `tax_amount: float >= 0`
+- `total_amount: float > 0`
+- `currency: USD | EUR | GBP`
+- Validators:
+  - `subtotal ≈ sum(line_items.line_total)` within 0.02
+  - `total_amount ≈ subtotal + tax_amount` within 0.02
+
+## Setup
+
+### Option A — uv
+
+```bash
+uv sync --extra dev
+```
+
+### Option B — normal virtual environment
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev]'
+```
+
+Copy the environment template if you want to use a real OpenAI call:
+
+```bash
+cp .env.example .env
+```
+
+Then put your API key in `.env`. Do not commit `.env`.
+
+## Run the app
+
+```bash
+streamlit run src/app.py
+```
+
+The UI supports:
+
+1. Normal local demo extraction.
+2. Real OpenAI structured extraction when `OPENAI_API_KEY` is set.
+3. **Simulate Reflection Repair** — intentionally fails validation on attempt 1 and self-corrects on attempt 2.
+4. **Simulate Edge Case Failure (DLQ)** — fails all attempts and writes `data/dlq.jsonl`.
+
+## Run tests
+
+```bash
+pytest -v
+```
+
+The suite verifies golden validation, invalid quantities, reconciliation errors, reflection recovery, and DLQ routing.
+
+## AI audit summary
+
+The baseline AI draft was reviewed rather than trusted directly. The audit found and corrected:
+
+1. Pydantic v1/v2 syntax mixing.
+2. Excessive context stuffing in retry prompts.
+3. Unsafe fallback behavior that could have returned partially valid records.
+
+See `ai_prompt_log.md` and `audit/baseline_excerpt.py` for the before/after discussion.
+
+## Demo sequence for the assignment video
+
+1. Show this architecture diagram and `src/schemas.py`.
+2. Open `ai_prompt_log.md` and explain two audit findings.
+3. Start Streamlit and load the sample invoice.
+4. Run a successful extraction.
+5. Click **Simulate Reflection Repair** and show attempt 1 failing and attempt 2 passing.
+6. Click **Simulate Edge Case Failure (DLQ)** and show `DLQ_FAILED` plus `data/dlq.jsonl`.
+7. Run `pytest -v` and show all tests passing.
+
+## Deployment
+
+A local demo is sufficient for the assignment if you document it clearly. If desired, deploy the Streamlit app to Streamlit Community Cloud and store `OPENAI_API_KEY` in the platform secret manager rather than in source control.

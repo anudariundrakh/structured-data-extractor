@@ -1,0 +1,16 @@
+README.md
+pyproject.toml
+src/__init__.py
+src/app.py
+src/extractor.py
+src/fallback.py
+src/parsers.py
+src/providers.py
+src/schemas.py
+src/structured_data_extractor.egg-info/PKG-INFO
+src/structured_data_extractor.egg-info/SOURCES.txt
+src/structured_data_extractor.egg-info/dependency_links.txt
+src/structured_data_extractor.egg-info/requires.txt
+src/structured_data_extractor.egg-info/top_level.txt
+tests/test_extraction.py
+tests/test_fallbacks.py
